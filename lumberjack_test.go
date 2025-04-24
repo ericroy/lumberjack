@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -42,6 +43,46 @@ func TestNewFile(t *testing.T) {
 	equals(len(b), n, t)
 	existsWithContent(logFile(dir), b, t)
 	fileCount(dir, 1, t)
+}
+
+func TestDefaultFilePermissions(t *testing.T) {
+	dir := makeTempDir("TestNewFile", t)
+	defer os.RemoveAll(dir)
+	l := &Logger{
+		Filename: logFile(dir),
+	}
+	defer l.Close()
+	b := []byte("boo!")
+	_, err := l.Write(b)
+	isNil(err, t)
+	if runtime.GOOS == "windows" {
+		// On Windows, file permissions will come back as simply "writable"
+		fileHasPermissions(logFile(dir), 0666, t)
+	} else {
+		// On Linux and others, file permissions will be exactly as we set them.
+		fileHasPermissions(logFile(dir), defaultFilePermissions, t)
+	}
+}
+
+func TestFilePermissions(t *testing.T) {
+	mode := FilePerms(0644)
+	dir := makeTempDir("TestNewFile", t)
+	defer os.RemoveAll(dir)
+	l := &Logger{
+		Filename:        logFile(dir),
+		FilePermissions: FilePerms(mode),
+	}
+	defer l.Close()
+	b := []byte("boo!")
+	_, err := l.Write(b)
+	isNil(err, t)
+	if runtime.GOOS == "windows" {
+		// On Windows, file permissions will come back as simply "writable"
+		fileHasPermissions(logFile(dir), 0666, t)
+	} else {
+		// On Linux and others, file permissions will be exactly as we set them.
+		fileHasPermissions(logFile(dir), mode.Value(), t)
+	}
 }
 
 func TestOpenExisting(t *testing.T) {
@@ -689,6 +730,7 @@ func TestJson(t *testing.T) {
 	data := []byte(`
 {
 	"filename": "foo",
+	"filepermissions": "0600",
 	"maxsize": 5,
 	"maxage": 10,
 	"maxbackups": 3,
@@ -700,6 +742,7 @@ func TestJson(t *testing.T) {
 	err := json.Unmarshal(data, &l)
 	isNil(err, t)
 	equals("foo", l.Filename, t)
+	equals(os.FileMode(0600), l.FilePermissions.Value(), t)
 	equals(5, l.MaxSize, t)
 	equals(10, l.MaxAge, t)
 	equals(3, l.MaxBackups, t)
@@ -726,6 +769,13 @@ func existsWithContent(path string, content []byte, t testing.TB) {
 	b, err := ioutil.ReadFile(path)
 	isNilUp(err, t, 1)
 	equalsUp(content, b, t, 1)
+}
+
+// fileHasPermissions checks that the given file exists and has the expected permissions.
+func fileHasPermissions(path string, expectedPermissions os.FileMode, t testing.TB) {
+	info, err := os.Stat(path)
+	isNilUp(err, t, 1)
+	equalsUp(expectedPermissions, info.Mode().Perm(), t, 1)
 }
 
 // logFile returns the log file name in the given directory for the current fake

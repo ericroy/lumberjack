@@ -3,7 +3,7 @@
 // Note that this is v2.0 of lumberjack, and should be imported using gopkg.in
 // thusly:
 //
-//   import "gopkg.in/natefinch/lumberjack.v2"
+//	import "gopkg.in/natefinch/lumberjack.v2"
 //
 // The package name remains simply lumberjack, and the code resides at
 // https://github.com/natefinch/lumberjack under the v2.0 branch.
@@ -30,15 +30,17 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	backupTimeFormat = "2006-01-02T15-04-05.000"
-	compressSuffix   = ".gz"
-	defaultMaxSize   = 100
+	backupTimeFormat       = "2006-01-02T15-04-05.000"
+	compressSuffix         = ".gz"
+	defaultMaxSize         = 100
+	defaultFilePermissions = os.FileMode(0600)
 )
 
 // ensure we always implement io.WriteCloser
@@ -66,7 +68,7 @@ var _ io.WriteCloser = (*Logger)(nil)
 // `/var/log/foo/server.log`, a backup created at 6:30pm on Nov 11 2016 would
 // use the filename `/var/log/foo/server-2016-11-04T18-30-00.000.log`
 //
-// Cleaning Up Old Log Files
+// # Cleaning Up Old Log Files
 //
 // Whenever a new logfile gets created, old log files may be deleted.  The most
 // recent files according to the encoded timestamp will be retained, up to a
@@ -81,6 +83,11 @@ type Logger struct {
 	// in the same directory.  It uses <processname>-lumberjack.log in
 	// os.TempDir() if empty.
 	Filename string `json:"filename" yaml:"filename"`
+
+	// FilePermissions are the permission flags to use for new log files.
+	// When specifying this property in JSON, it must be an octal string.
+	// It defaults to 0600.
+	FilePermissions FilePerms `json:"filepermissions" yaml:"filepermissions"`
 
 	// MaxSize is the maximum size in megabytes of the log file before it gets
 	// rotated. It defaults to 100 megabytes.
@@ -212,7 +219,10 @@ func (l *Logger) openNew() error {
 	}
 
 	name := l.filename()
-	mode := os.FileMode(0600)
+	mode := l.FilePermissions.Value()
+	if mode == 0 {
+		mode = defaultFilePermissions
+	}
 	info, err := osStat(name)
 	if err == nil {
 		// Copy the mode off the old logfile.
@@ -538,4 +548,23 @@ func (b byFormatTime) Swap(i, j int) {
 
 func (b byFormatTime) Len() int {
 	return len(b)
+}
+
+type FilePerms os.FileMode
+
+func (d FilePerms) Value() os.FileMode {
+	return os.FileMode(d)
+}
+
+func (d *FilePerms) UnmarshalText(b []byte) error {
+	u, err := strconv.ParseUint(string(b), 8, 32)
+	if err != nil {
+		return err
+	}
+	*d = FilePerms(uint32(u))
+	return nil
+}
+
+func (d *FilePerms) MarshalText() ([]byte, error) {
+	return []byte(strconv.FormatUint(uint64(*d), 8)), nil
 }
